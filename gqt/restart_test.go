@@ -146,6 +146,18 @@ var _ = Describe("Surviving Restarts", func() {
 				Consistently(check, time.Second*2, time.Millisecond*200).Should(Equal("0\n"), "expected user process to stay dead")
 			})
 
+			Context("when running a pea", func() {
+				BeforeEach(func() {
+					processImage = garden.ImageRef{URI: defaultTestRootFS}
+				})
+
+				It("destroys the pea container", func() {
+					dirs, err := ioutil.ReadDir("/run/runc")
+					Expect(err).NotTo(HaveOccurred())
+					Expect(dirs).To(BeEmpty())
+				})
+			})
+
 			Context("when the garden server does not shut down gracefully", func() {
 				BeforeEach(func() {
 					gracefulShutdown = false
