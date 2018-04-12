@@ -13,7 +13,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = Describe("Bind mount", func() {
+var _ = FDescribe("Bind mount", func() {
 	var (
 		client    *runner.RunningGarden
 		container garden.Container
@@ -28,6 +28,8 @@ var _ = Describe("Bind mount", func() {
 
 		// pre-existing file for permissions testing
 		testFileName string
+
+		setupMounts func([]string) string
 	)
 
 	BeforeEach(func() {
@@ -43,7 +45,9 @@ var _ = Describe("Bind mount", func() {
 	})
 
 	JustBeforeEach(func() {
-		srcPath, testFileName = createTestHostDirAndTestFile(mountOptions)
+		srcPath = setupMounts(mountOptions)
+		testFileName = createTestFileIn(srcPath)
+
 		client = runner.Start(config)
 
 		var err error
@@ -62,8 +66,6 @@ var _ = Describe("Bind mount", func() {
 	})
 
 	AfterEach(func() {
-		unmount(srcPath)
-
 		err := os.RemoveAll(srcPath)
 		Expect(err).ToNot(HaveOccurred())
 
@@ -75,291 +77,359 @@ var _ = Describe("Bind mount", func() {
 		Expect(client.DestroyAndStop()).To(Succeed())
 	})
 
-	Context("which is read-only", func() {
+	Context("when mount source is a bind mount on host", func() {
 		BeforeEach(func() {
-			bindMountMode = garden.BindMountModeRO
-			dstPath = "/home/alice/readonly"
+			setupMounts = createBindMount
 		})
 
-		Context("and with privileged=true", func() {
+		AfterEach(func() {
+			unmount(srcPath)
+		})
+
+		Context("which is read-only", func() {
 			BeforeEach(func() {
-				privilegedContainer = true
+				bindMountMode = garden.BindMountModeRO
+				dstPath = "/home/alice/readonly"
 			})
 
-			It("allows all users to read files", func() {
-				readProcess := containerReadFile(container, dstPath, testFileName, "alice")
-				Expect(readProcess.Wait()).To(Equal(0))
+			Context("and with privileged=true", func() {
+				BeforeEach(func() {
+					privilegedContainer = true
+				})
+
+				It("allows all users to read files", func() {
+					readProcess := containerReadFile(container, dstPath, testFileName, "alice")
+					Expect(readProcess.Wait()).To(Equal(0))
+				})
+
+				It("does not allow non-root users to write files", func() {
+					writeProcess := writeFile(container, dstPath, "alice")
+					Expect(writeProcess.Wait()).ToNot(Equal(0))
+				})
+
+				It("allows root to read files", func() {
+					readProcess := containerReadFile(container, dstPath, testFileName, "root")
+					Expect(readProcess.Wait()).To(Equal(0))
+				})
+
+				It("does not allow root to write files", func() {
+					writeProcess := writeFile(container, dstPath, "root")
+					Expect(writeProcess.Wait()).ToNot(Equal(0))
+				})
+
+				Describe("nested-mounts", func() {
+					var nestedMountpoint string
+
+					JustBeforeEach(func() {
+						nestedMountpoint = createMountPointUnder(srcPath)
+					})
+
+					AfterEach(func() {
+						unmount(nestedMountpoint)
+					})
+
+					It("allows all users to read from nested bind mounts", func() {
+						nestedPath := filepath.Join(dstPath, "nested-bind")
+						readProcess := containerReadFile(container, nestedPath, "nested-file", "alice")
+						Expect(readProcess.Wait()).To(Equal(0))
+					})
+
+					It("allows non-root to write to nested bind mounts", func() {
+						nestedPath := filepath.Join(dstPath, "nested-bind")
+						writeProcess := writeFile(container, nestedPath, "alice")
+						Expect(writeProcess.Wait()).To(Equal(0))
+					})
+
+					It("allows root to read from nested bind mounts", func() {
+						nestedPath := filepath.Join(dstPath, "nested-bind")
+						readProcess := containerReadFile(container, nestedPath, "nested-file", "alice")
+						Expect(readProcess.Wait()).To(Equal(0))
+					})
+
+					It("allows root to write to from nested bind mounts", func() {
+						nestedPath := filepath.Join(dstPath, "nested-bind")
+						writeProcess := writeFile(container, nestedPath, "root")
+						Expect(writeProcess.Wait()).To(Equal(0))
+					})
+				})
 			})
 
-			It("does not allow non-root users to write files", func() {
-				writeProcess := writeFile(container, dstPath, "alice")
-				Expect(writeProcess.Wait()).ToNot(Equal(0))
+			Context("and with privileged=false", func() {
+				BeforeEach(func() {
+					privilegedContainer = false
+				})
+
+				It("allows all users to read files", func() {
+					readProcess := containerReadFile(container, dstPath, testFileName, "alice")
+					Expect(readProcess.Wait()).To(Equal(0))
+				})
+
+				It("allows non-root users to write files", func() {
+					writeProcess := writeFile(container, dstPath, "alice")
+					Expect(writeProcess.Wait()).ToNot(Equal(0))
+				})
+
+				It("allows root to read files", func() {
+					readProcess := containerReadFile(container, dstPath, testFileName, "root")
+					Expect(readProcess.Wait()).To(Equal(0))
+				})
+
+				It("does not allow root to write files", func() {
+					writeProcess := writeFile(container, dstPath, "root")
+					Expect(writeProcess.Wait()).ToNot(Equal(0))
+				})
+
+				Describe("nested-mounts", func() {
+					var nestedMountpoint string
+
+					JustBeforeEach(func() {
+						nestedMountpoint = createMountPointUnder(srcPath)
+					})
+
+					AfterEach(func() {
+						unmount(nestedMountpoint)
+					})
+
+					It("allows all users to read from nested bind mounts", func() {
+						nestedPath := filepath.Join(dstPath, "nested-bind")
+						readProcess := containerReadFile(container, nestedPath, "nested-file", "alice")
+						Expect(readProcess.Wait()).To(Equal(0))
+					})
+
+					It("allows non-root to write to nested bind mounts", func() {
+						nestedPath := filepath.Join(dstPath, "nested-bind")
+						writeProcess := writeFile(container, nestedPath, "alice")
+						Expect(writeProcess.Wait()).To(Equal(0))
+					})
+
+					It("allows root to read from nested bind mounts", func() {
+						nestedPath := filepath.Join(dstPath, "nested-bind")
+						readProcess := containerReadFile(container, nestedPath, "nested-file", "alice")
+						Expect(readProcess.Wait()).To(Equal(0))
+					})
+
+					It("allows root to write to from nested bind mounts", func() {
+						nestedPath := filepath.Join(dstPath, "nested-bind")
+						writeProcess := writeFile(container, nestedPath, "root")
+						Expect(writeProcess.Wait()).To(Equal(0))
+					})
+				})
 			})
 
-			It("allows root to read files", func() {
-				readProcess := containerReadFile(container, dstPath, testFileName, "root")
-				Expect(readProcess.Wait()).To(Equal(0))
+			Context("when mount directory is a mountpoint with an extra option", func() {
+				BeforeEach(func() {
+					mountOptions = []string{"-t", "tmpfs", "-o", "noexec"}
+				})
+
+				It("should suceed", func() {
+					readProcess := containerReadFile(container, dstPath, testFileName, "root")
+					Expect(readProcess.Wait()).To(Equal(0))
+				})
+			})
+		})
+
+		Context("which is read-write", func() {
+			BeforeEach(func() {
+				bindMountMode = garden.BindMountModeRW
+				dstPath = "/home/alice/readwrite"
 			})
 
-			It("does not allow root to write files", func() {
-				writeProcess := writeFile(container, dstPath, "root")
-				Expect(writeProcess.Wait()).ToNot(Equal(0))
+			Context("and with privileged=true", func() {
+				BeforeEach(func() {
+					privilegedContainer = true
+				})
+
+				It("allows all users to read files", func() {
+					readProcess := containerReadFile(container, dstPath, testFileName, "alice")
+					Expect(readProcess.Wait()).To(Equal(0))
+				})
+
+				It("does not allow non-root users to write files (since the mounted directory is owned by host-root)", func() {
+					writeProcess := writeFile(container, dstPath, "alice")
+					Expect(writeProcess.Wait()).ToNot(Equal(0))
+				})
+
+				It("allows root to read files", func() {
+					readProcess := containerReadFile(container, dstPath, testFileName, "root")
+					Expect(readProcess.Wait()).To(Equal(0))
+				})
+
+				It("allows root to write files (as container and host root are the same)", func() {
+					writeProcess := writeFile(container, dstPath, "root")
+					Expect(writeProcess.Wait()).To(Equal(0))
+				})
+
+				Describe("nested-mounts", func() {
+					var nestedMountpoint string
+
+					JustBeforeEach(func() {
+						nestedMountpoint = createMountPointUnder(srcPath)
+					})
+
+					AfterEach(func() {
+						unmount(nestedMountpoint)
+					})
+
+					It("allows all users to read from nested bind mounts", func() {
+						nestedPath := filepath.Join(dstPath, "nested-bind")
+						readProcess := containerReadFile(container, nestedPath, "nested-file", "alice")
+						Expect(readProcess.Wait()).To(Equal(0))
+					})
+
+					It("allows non-root to write to nested bind mounts", func() {
+						nestedPath := filepath.Join(dstPath, "nested-bind")
+						writeProcess := writeFile(container, nestedPath, "alice")
+						Expect(writeProcess.Wait()).To(Equal(0))
+					})
+
+					It("allows root to read from nested bind mounts", func() {
+						nestedPath := filepath.Join(dstPath, "nested-bind")
+						readProcess := containerReadFile(container, nestedPath, "nested-file", "alice")
+						Expect(readProcess.Wait()).To(Equal(0))
+					})
+
+					It("allows root to write to from nested bind mounts", func() {
+						nestedPath := filepath.Join(dstPath, "nested-bind")
+						writeProcess := writeFile(container, nestedPath, "root")
+						Expect(writeProcess.Wait()).To(Equal(0))
+					})
+				})
 			})
 
-			Describe("nested-mounts", func() {
-				var nestedMountpoint string
+			Context("and with privileged=false", func() {
+				BeforeEach(func() {
+					privilegedContainer = false
+				})
+
+				It("allows all users to read files", func() {
+					readProcess := containerReadFile(container, dstPath, testFileName, "alice")
+					Expect(readProcess.Wait()).To(Equal(0))
+				})
+
+				// the mounted directory is owned by host-root, so alice shouldnt be able to write
+				It("does not allow non-root users to write files", func() {
+					writeProcess := writeFile(container, dstPath, "alice")
+					Expect(writeProcess.Wait()).ToNot(Equal(0))
+				})
+
+				It("allows root to read files", func() {
+					readProcess := containerReadFile(container, dstPath, testFileName, "root")
+					Expect(readProcess.Wait()).To(Equal(0))
+				})
+
+				// container and host root are not the same, and the mounted directory is
+				// owned by host-root, so writes should fail.
+				It("does not allow root to write files", func() {
+					writeProcess := writeFile(container, dstPath, "root")
+					Expect(writeProcess.Wait()).NotTo(Equal(0))
+				})
+
+				Describe("nested-mounts", func() {
+					var nestedMountpoint string
+
+					JustBeforeEach(func() {
+						nestedMountpoint = createMountPointUnder(srcPath)
+					})
+
+					AfterEach(func() {
+						unmount(nestedMountpoint)
+					})
+
+					It("allows all users to read from nested bind mounts", func() {
+						nestedPath := filepath.Join(dstPath, "nested-bind")
+						readProcess := containerReadFile(container, nestedPath, "nested-file", "alice")
+						Expect(readProcess.Wait()).To(Equal(0))
+					})
+
+					It("allows non-root to write to nested bind mounts", func() {
+						nestedPath := filepath.Join(dstPath, "nested-bind")
+						writeProcess := writeFile(container, nestedPath, "alice")
+						Expect(writeProcess.Wait()).To(Equal(0))
+					})
+
+					It("allows root to read from nested bind mounts", func() {
+						nestedPath := filepath.Join(dstPath, "nested-bind")
+						readProcess := containerReadFile(container, nestedPath, "nested-file", "alice")
+						Expect(readProcess.Wait()).To(Equal(0))
+					})
+
+					It("allows root to write to from nested bind mounts", func() {
+						nestedPath := filepath.Join(dstPath, "nested-bind")
+						writeProcess := writeFile(container, nestedPath, "root")
+						Expect(writeProcess.Wait()).To(Equal(0))
+					})
+				})
+			})
+		})
+
+		Context("when the source is inside a bind mount", func() {
+			var bindMount string
+
+			BeforeEach(func() {
+				bindMount = createBindMount(mountOptions)
+			})
+
+			AfterEach(func() {
+				srcPath = bindMount
+			})
+
+			Context("and is a directory", func() {
+				BeforeEach(func() {
+					setupMounts = func(mountOptions []string) string {
+						path := filepath.Join(bindMount, "dir-in-the-bind-mount")
+						Expect(os.MkdirAll(path, os.ModePerm)).To(Succeed())
+						return path
+					}
+					dstPath = "/home/alice/foo"
+				})
+
+				It("file can be read", func() {
+					readProcess := containerReadFile(container, dstPath, testFileName, "alice")
+					Expect(readProcess.Wait()).To(Equal(0))
+				})
+			})
+
+			Context("and is a file", func() {
+				BeforeEach(func() {
+					setupMounts = func(mountOptions []string) string {
+						return bindMount
+					}
+					dstPath = "/home/alice/foo"
+				})
 
 				JustBeforeEach(func() {
-					nestedMountpoint = createMountPointUnder(srcPath)
+					srcPath = filepath.Join(bindMount, testFileName)
 				})
 
 				AfterEach(func() {
-					unmount(nestedMountpoint)
+					srcPath = bindMount
 				})
 
-				It("allows all users to read from nested bind mounts", func() {
-					nestedPath := filepath.Join(dstPath, "nested-bind")
-					readProcess := containerReadFile(container, nestedPath, "nested-file", "alice")
+				It("file can be read", func() {
+					readProcess := containerReadFile(container, dstPath, testFileName, "alice")
 					Expect(readProcess.Wait()).To(Equal(0))
 				})
-
-				It("allows non-root to write to nested bind mounts", func() {
-					nestedPath := filepath.Join(dstPath, "nested-bind")
-					writeProcess := writeFile(container, nestedPath, "alice")
-					Expect(writeProcess.Wait()).To(Equal(0))
-				})
-
-				It("allows root to read from nested bind mounts", func() {
-					nestedPath := filepath.Join(dstPath, "nested-bind")
-					readProcess := containerReadFile(container, nestedPath, "nested-file", "alice")
-					Expect(readProcess.Wait()).To(Equal(0))
-				})
-
-				It("allows root to write to from nested bind mounts", func() {
-					nestedPath := filepath.Join(dstPath, "nested-bind")
-					writeProcess := writeFile(container, nestedPath, "root")
-					Expect(writeProcess.Wait()).To(Equal(0))
-				})
-			})
-		})
-
-		Context("and with privileged=false", func() {
-			BeforeEach(func() {
-				privilegedContainer = false
-			})
-
-			It("allows all users to read files", func() {
-				readProcess := containerReadFile(container, dstPath, testFileName, "alice")
-				Expect(readProcess.Wait()).To(Equal(0))
-			})
-
-			It("allows non-root users to write files", func() {
-				writeProcess := writeFile(container, dstPath, "alice")
-				Expect(writeProcess.Wait()).ToNot(Equal(0))
-			})
-
-			It("allows root to read files", func() {
-				readProcess := containerReadFile(container, dstPath, testFileName, "root")
-				Expect(readProcess.Wait()).To(Equal(0))
-			})
-
-			It("does not allow root to write files", func() {
-				writeProcess := writeFile(container, dstPath, "root")
-				Expect(writeProcess.Wait()).ToNot(Equal(0))
-			})
-
-			Describe("nested-mounts", func() {
-				var nestedMountpoint string
-
-				JustBeforeEach(func() {
-					nestedMountpoint = createMountPointUnder(srcPath)
-				})
-
-				AfterEach(func() {
-					unmount(nestedMountpoint)
-				})
-
-				It("allows all users to read from nested bind mounts", func() {
-					nestedPath := filepath.Join(dstPath, "nested-bind")
-					readProcess := containerReadFile(container, nestedPath, "nested-file", "alice")
-					Expect(readProcess.Wait()).To(Equal(0))
-				})
-
-				It("allows non-root to write to nested bind mounts", func() {
-					nestedPath := filepath.Join(dstPath, "nested-bind")
-					writeProcess := writeFile(container, nestedPath, "alice")
-					Expect(writeProcess.Wait()).To(Equal(0))
-				})
-
-				It("allows root to read from nested bind mounts", func() {
-					nestedPath := filepath.Join(dstPath, "nested-bind")
-					readProcess := containerReadFile(container, nestedPath, "nested-file", "alice")
-					Expect(readProcess.Wait()).To(Equal(0))
-				})
-
-				It("allows root to write to from nested bind mounts", func() {
-					nestedPath := filepath.Join(dstPath, "nested-bind")
-					writeProcess := writeFile(container, nestedPath, "root")
-					Expect(writeProcess.Wait()).To(Equal(0))
-				})
-			})
-		})
-
-		Context("when mount directory is a mountpoint with an extra option", func() {
-			BeforeEach(func() {
-				mountOptions = []string{"-t", "tmpfs", "-o", "noexec"}
-			})
-
-			It("should suceed", func() {
-				readProcess := containerReadFile(container, dstPath, testFileName, "root")
-				Expect(readProcess.Wait()).To(Equal(0))
 			})
 		})
 	})
 
-	Context("which is read-write", func() {
+	Context("when the source is a regular directory", func() {
 		BeforeEach(func() {
-			bindMountMode = garden.BindMountModeRW
-			dstPath = "/home/alice/readwrite"
+			setupMounts = func(mountOptions []string) string {
+				return createRootOwnedTempDir()
+			}
+			dstPath = "/home/alice/foo"
 		})
 
-		Context("and with privileged=true", func() {
-			BeforeEach(func() {
-				privilegedContainer = true
-			})
-
-			It("allows all users to read files", func() {
-				readProcess := containerReadFile(container, dstPath, testFileName, "alice")
-				Expect(readProcess.Wait()).To(Equal(0))
-			})
-
-			It("does not allow non-root users to write files (since the mounted directory is owned by host-root)", func() {
-				writeProcess := writeFile(container, dstPath, "alice")
-				Expect(writeProcess.Wait()).ToNot(Equal(0))
-			})
-
-			It("allows root to read files", func() {
-				readProcess := containerReadFile(container, dstPath, testFileName, "root")
-				Expect(readProcess.Wait()).To(Equal(0))
-			})
-
-			It("allows root to write files (as container and host root are the same)", func() {
-				writeProcess := writeFile(container, dstPath, "root")
-				Expect(writeProcess.Wait()).To(Equal(0))
-			})
-
-			Describe("nested-mounts", func() {
-				var nestedMountpoint string
-
-				JustBeforeEach(func() {
-					nestedMountpoint = createMountPointUnder(srcPath)
-				})
-
-				AfterEach(func() {
-					unmount(nestedMountpoint)
-				})
-
-				It("allows all users to read from nested bind mounts", func() {
-					nestedPath := filepath.Join(dstPath, "nested-bind")
-					readProcess := containerReadFile(container, nestedPath, "nested-file", "alice")
-					Expect(readProcess.Wait()).To(Equal(0))
-				})
-
-				It("allows non-root to write to nested bind mounts", func() {
-					nestedPath := filepath.Join(dstPath, "nested-bind")
-					writeProcess := writeFile(container, nestedPath, "alice")
-					Expect(writeProcess.Wait()).To(Equal(0))
-				})
-
-				It("allows root to read from nested bind mounts", func() {
-					nestedPath := filepath.Join(dstPath, "nested-bind")
-					readProcess := containerReadFile(container, nestedPath, "nested-file", "alice")
-					Expect(readProcess.Wait()).To(Equal(0))
-				})
-
-				It("allows root to write to from nested bind mounts", func() {
-					nestedPath := filepath.Join(dstPath, "nested-bind")
-					writeProcess := writeFile(container, nestedPath, "root")
-					Expect(writeProcess.Wait()).To(Equal(0))
-				})
-			})
-		})
-
-		Context("and with privileged=false", func() {
-			BeforeEach(func() {
-				privilegedContainer = false
-			})
-
-			It("allows all users to read files", func() {
-				readProcess := containerReadFile(container, dstPath, testFileName, "alice")
-				Expect(readProcess.Wait()).To(Equal(0))
-			})
-
-			// the mounted directory is owned by host-root, so alice shouldnt be able to write
-			It("does not allow non-root users to write files", func() {
-				writeProcess := writeFile(container, dstPath, "alice")
-				Expect(writeProcess.Wait()).ToNot(Equal(0))
-			})
-
-			It("allows root to read files", func() {
-				readProcess := containerReadFile(container, dstPath, testFileName, "root")
-				Expect(readProcess.Wait()).To(Equal(0))
-			})
-
-			// container and host root are not the same, and the mounted directory is
-			// owned by host-root, so writes should fail.
-			It("does not allow root to write files", func() {
-				writeProcess := writeFile(container, dstPath, "root")
-				Expect(writeProcess.Wait()).NotTo(Equal(0))
-			})
-
-			Describe("nested-mounts", func() {
-				var nestedMountpoint string
-
-				JustBeforeEach(func() {
-					nestedMountpoint = createMountPointUnder(srcPath)
-				})
-
-				AfterEach(func() {
-					unmount(nestedMountpoint)
-				})
-
-				It("allows all users to read from nested bind mounts", func() {
-					nestedPath := filepath.Join(dstPath, "nested-bind")
-					readProcess := containerReadFile(container, nestedPath, "nested-file", "alice")
-					Expect(readProcess.Wait()).To(Equal(0))
-				})
-
-				It("allows non-root to write to nested bind mounts", func() {
-					nestedPath := filepath.Join(dstPath, "nested-bind")
-					writeProcess := writeFile(container, nestedPath, "alice")
-					Expect(writeProcess.Wait()).To(Equal(0))
-				})
-
-				It("allows root to read from nested bind mounts", func() {
-					nestedPath := filepath.Join(dstPath, "nested-bind")
-					readProcess := containerReadFile(container, nestedPath, "nested-file", "alice")
-					Expect(readProcess.Wait()).To(Equal(0))
-				})
-
-				It("allows root to write to from nested bind mounts", func() {
-					nestedPath := filepath.Join(dstPath, "nested-bind")
-					writeProcess := writeFile(container, nestedPath, "root")
-					Expect(writeProcess.Wait()).To(Equal(0))
-				})
-			})
+		It("file can be read", func() {
+			readProcess := containerReadFile(container, dstPath, testFileName, "alice")
+			Expect(readProcess.Wait()).To(Equal(0))
 		})
 	})
 })
 
-func createTestHostDirAndTestFile(mountOptions []string) (string, string) {
-	tstHostDir, err := ioutil.TempDir("", "bind-mount-test-dir")
-	Expect(err).ToNot(HaveOccurred())
-	err = os.Chown(tstHostDir, 0, 0)
-	Expect(err).ToNot(HaveOccurred())
-	err = os.Chmod(tstHostDir, 0755)
-	Expect(err).ToNot(HaveOccurred())
-
+func createBindMount(mountOptions []string) string {
+	tstHostDir := createRootOwnedTempDir()
 	var cmd *exec.Cmd
 	cmd = exec.Command("mount", append(mountOptions, tstHostDir, tstHostDir)...)
 	Expect(cmd.Run()).To(Succeed())
@@ -381,12 +451,26 @@ func createTestHostDirAndTestFile(mountOptions []string) (string, string) {
 		tstHostDir, mountCommandOutput, string(mountMakeSharedCommandOutputBytes))
 	Expect(err).ToNot(HaveOccurred(), debugMsg)
 
-	fileName := fmt.Sprintf("bind-mount-%d-test-file", GinkgoParallelNode())
-	file, err := os.OpenFile(filepath.Join(tstHostDir, fileName), os.O_CREATE|os.O_RDWR, 0777)
+	return tstHostDir
+}
+
+func createRootOwnedTempDir() string {
+	dir, err := ioutil.TempDir("", "test-dir")
+	Expect(err).ToNot(HaveOccurred())
+	err = os.Chown(dir, 0, 0)
+	Expect(err).ToNot(HaveOccurred())
+	err = os.Chmod(dir, 0755)
+	Expect(err).ToNot(HaveOccurred())
+
+	return dir
+}
+
+func createTestFileIn(dir string) string {
+	fileName := fmt.Sprintf("test-file-%d", GinkgoParallelNode())
+	file, err := os.OpenFile(filepath.Join(dir, fileName), os.O_CREATE|os.O_RDWR, 0777)
 	Expect(err).ToNot(HaveOccurred())
 	Expect(file.Close()).ToNot(HaveOccurred())
-
-	return tstHostDir, fileName
+	return fileName
 }
 
 func createMountPointUnder(srcPath string) string {
