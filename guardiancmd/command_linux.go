@@ -32,6 +32,7 @@ import (
 	"code.cloudfoundry.org/lager"
 	"github.com/docker/docker/daemon/graphdriver"
 	"github.com/docker/docker/graph"
+	"github.com/docker/docker/pkg/mount"
 	"github.com/eapache/go-resiliency/retrier"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 )
@@ -310,5 +311,10 @@ func (f *LinuxFactory) wireShed(logger lager.Logger) *rootfs_provider.CakeOrdina
 }
 
 func wireMounts() bundlerules.Mounts {
-	return bundlerules.Mounts{MountPointChecker: rundmc.IsMountPoint, MountOptionsGetter: rundmc.GetMountOptions}
+	return bundlerules.Mounts{
+		MountOptionsGetter: rundmc.GetMountOptions,
+		MountInfosProvider: func() ([]*mount.Info, error) {
+			return mount.GetMounts()
+		},
+	}
 }
