@@ -37,25 +37,9 @@ var _ = Describe("Nerd", func() {
 			containers := listContainers(testConfig.CtrBin, testConfig.Socket)
 			Expect(containers).NotTo(ContainSubstring("test-id"))
 		})
-
-		Context("when loading the container fails", func() {
-			It("bubbles up the error", func() {
-				Expect(cnerd.Delete(nil, "non-existent-id")).NotTo(Succeed())
-			})
-		})
-
-		Context("when loading the task fails", func() {
-			It("bubbles up the error", func() {
-				spec := generateSpec(containerdContext, containerdClient, "container-with-no-task")
-				createContainer(containerdContext, containerdClient, spec, "container-with-no-task")
-				Expect(cnerd.Delete(nil, "container-with-no-task")).NotTo(Succeed())
-			})
-		})
-
-		// TODO: Any way to make deleting task or container fail?
 	})
 
-	FDescribe("State", func() {
+	Describe("State", func() {
 		It("gets the pid and status of a running task", func() {
 			spec := generateSpec(containerdContext, containerdClient, "test-id")
 			container := createContainer(containerdContext, containerdClient, spec, "test-id")
@@ -66,7 +50,6 @@ var _ = Describe("Nerd", func() {
 			Expect(pid).NotTo(BeZero())
 			Expect(status).To(Equal(containerd.Running))
 		})
-		// TODO: Any way to make deleting task or container fail?
 	})
 })
 

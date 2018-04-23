@@ -54,20 +54,20 @@ func (n *Nerd) Delete(log lager.Logger, containerID string) error {
 }
 
 func (n *Nerd) State(log lager.Logger, containerID string) (int, containerd.ProcessStatus, error) {
-	container, _ := n.client.LoadContainer(n.context, containerID)
-	// if err != nil {
-	// 	return 0, "", err
-	// }
+	container, err := n.client.LoadContainer(n.context, containerID)
+	if err != nil {
+		return 0, "", err
+	}
 
-	task, _ := container.Task(n.context, nil)
-	// if err != nil {
-	// 	return 0, "", err
-	// }
+	task, err := container.Task(n.context, nil)
+	if err != nil {
+		return 0, "", err
+	}
 
-	status, _ := task.Status(n.context)
-	// if err != nil {
-	// 	return 0, "", err
-	// }
+	status, err := task.Status(n.context)
+	if err != nil {
+		return 0, "", err
+	}
 
 	return int(task.Pid()), status.Status, nil
 }
